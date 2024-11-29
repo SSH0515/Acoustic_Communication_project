@@ -126,5 +126,3 @@ while toc < 10
 end
 
 disp('Recording Completed')
-
-%test test test
