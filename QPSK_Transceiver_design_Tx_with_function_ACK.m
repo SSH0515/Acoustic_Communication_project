@@ -23,7 +23,8 @@ channel_coded_bits_Lena = Encoding_hamming(bits_Lena_with_CRC);
 shuffled_bits_Lena = interleaving_bits(channel_coded_bits_Lena);
 
 %% Modulation
-symbols_Lena = 2*shuffled_bits_Lena - 1; % BPSK mapping
+int_symbol = bit2int(shuffled_bits_Lena, 2);
+symbols_Lena = pskmod(int_symbol, 4, pi/4); % QPSK mapping
 
 %% OFDM
 symbols_time_Lena = OFDM(symbols_Lena);
@@ -42,7 +43,7 @@ fs= 10000;
 disp('Transmit Signal...')
 sound(tx_signal,fs) % Sampling rate : 10,000Hz
 
-signal_duration = 20;
+signal_duration = 5;
 pause(signal_duration)
 
 
@@ -56,15 +57,17 @@ setup(devicereader);
 
 disp('Recording. . .')
 tic; % set the timer
-rx_signal = [];
+rx_signal_ACK = [];
 
 while toc < 10
     acquiredAudio = devicereader();
-    rx_signal = [rx_signal; acquiredAudio];
+    rx_signal_ACK = [rx_signal_ACK; acquiredAudio];
 end
 
 disp('Recording Completed')
 
+%% Extract ACK
+ACK = Extract_ACK(rx_signal_ACK);
 
 %% Tx Functions
 function image_bits = imagetoBits(img)
@@ -131,8 +134,8 @@ N_blk = cn + cn/4; % Number of OFDM blocks including pilot signal
 % Serial to Parallel
 symbols_freq={};
 for i = 1:cn
-    symbols_freq{end+1} = [zeros(N/4,1);0;symbols(N/4*(i-1)+1:N/4*i)]; % 64개만 사용
-    symbols_freq{end} = [symbols_freq{end}; flip(symbols_freq{end}(2:end-1))];
+    symbols_freq{end+1} = [zeros(N/4,1); symbols(N/4*(i-1)+1:N/4*i)]; % 64개만 사용
+    symbols_freq{end} = [symbols_freq{end};0; flip(conj(symbols_freq{end}(2:end)))];
 end
 
 % Inverse Discrete Fourier Transform (IDFT)
@@ -175,3 +178,79 @@ pilot_time = ifft(pilot_freq)*sqrt(N);
 pilot_time =[pilot_time(end-N_cp+1:end); pilot_time];
 end
 
+function ACK = Extract_ACK(rx_signal)
+
+% Preamble
+omega = 10;
+mu =0.1;
+Tp = 100;
+tp = (1:Tp).';
+preamble = cos(omega*tp+mu*tp.^2/2);
+
+length_ACK = [0 0 0]; % initial ack
+
+M = length(length_ACK); % Number of bits
+N = 256; % Number of subcarriers
+N_cp = 32; %Length of cyclic prefix
+cn = 1; % Number of valid OFDM blocks
+N_blk = cn + 1; % Number of OFDM blocks including pilot signal
+
+% Time Synchronization
+[xC, lags] = xcorr(rx_signal, preamble);
+[~,idx] = max(xC);
+start_pt = lags(idx);
+
+rx_signal = rx_signal(start_pt+Tp+1:end);
+
+% Serial to Parallel
+% Delete the cyclic prefix and make it parallel
+OFDM_blks={};
+for i = 1:N_blk
+    OFDM_blks{end+1} = rx_signal(N_cp+1:N+N_cp);
+    rx_signal = rx_signal(N_cp+N+1:end);
+end
+
+
+% Discrete Fourier Transform (DFT)
+% To change the symbols in the time domain to the frequency domain
+demod_OFDM_blks = {};
+for i = 1:length(OFDM_blks)
+    demod_OFDM_blks{end+1} = fft(OFDM_blks{i})/sqrt(N); % 256 point DFT
+end
+
+% pilot signal
+rng('default')
+pilot_half = [zeros(N/4,1);1; 2*randi([0,1],N/4,1)-1];
+pilot_freq = [pilot_half; flip(pilot_half(2:end-1))];
+pilot_time = ifft(pilot_freq)*sqrt(N);
+pilot_time =[pilot_time(end-N_cp+1:end); pilot_time];
+
+% Channel Estimation & Equalization
+symbols_eq = {};
+channel = demod_OFDM_blks{1} ./ pilot_freq;
+symbols_eq{end+1} = demod_OFDM_blks{2} ./ channel;
+
+
+% Detection
+% Symbol detection after the equalization
+symbols_detect = {};
+for i = 1:length(symbols_eq)
+    symbols_detect{end+1} = sign(real(symbols_eq{i}));
+end
+
+%Demodulation
+symbols_est = symbols_detect{1}(N/2-1 : N/2+1);
+
+symbols_est(symbols_est==0)=1;
+
+demodulated_bits = (symbols_est+1) / 2 ;
+
+% Channel decoding
+if length(find(demodulated_bits==1)) > length(find(demodulated_bits==0))
+    ACK = 1;
+else
+    ACK = 0;
+end
+
+
+end

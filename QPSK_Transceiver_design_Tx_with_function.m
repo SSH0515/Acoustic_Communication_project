@@ -23,7 +23,8 @@ channel_coded_bits_Lena = Encoding_hamming(bits_Lena_with_CRC);
 shuffled_bits_Lena = interleaving_bits(channel_coded_bits_Lena);
 
 %% Modulation
-symbols_Lena = 2*shuffled_bits_Lena - 1; % BPSK mapping
+int_symbol = bit2int(shuffled_bits_Lena, 2);
+symbols_Lena = pskmod(int_symbol, 4, pi/4); % QPSK mapping
 
 %% OFDM
 symbols_time_Lena = OFDM(symbols_Lena);
@@ -131,8 +132,8 @@ N_blk = cn + cn/4; % Number of OFDM blocks including pilot signal
 % Serial to Parallel
 symbols_freq={};
 for i = 1:cn
-    symbols_freq{end+1} = [zeros(N/4,1);0;symbols(N/4*(i-1)+1:N/4*i)]; % 64개만 사용
-    symbols_freq{end} = [symbols_freq{end}; flip(symbols_freq{end}(2:end-1))];
+    symbols_freq{end+1} = [zeros(N/4,1); symbols(N/4*(i-1)+1:N/4*i)]; % 64개만 사용
+    symbols_freq{end} = [symbols_freq{end};0; flip(conj(symbols_freq{end}(2:end)))];
 end
 
 % Inverse Discrete Fourier Transform (IDFT)

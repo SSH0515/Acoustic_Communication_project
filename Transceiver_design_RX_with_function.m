@@ -212,6 +212,7 @@ end
 end
 
 function CRC_check_res = Check_CRC(HD_decoded_bits)
+poly = [1 0 1 1];
 crc_bits = reshape(HD_decoded_bits,11,length(HD_decoded_bits)/11).';
 CRC_check_res = [];
 
